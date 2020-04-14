@@ -1,0 +1,197 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Angela"
+date: "4/8/2020"
+output:
+  html_document: default
+  pdf_document: default
+---
+## Project Overview 
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.   
+
+In this [dataset](http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har), six male participants aged between 20-28 years, with little weight lifting experience, were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions. 
+
+*  Each class is defined as:
+    +  exactly according to the specification (Class A)  
+    +  throwing the elbows to the front (Class B)  
+    +  lifting the dumbbell only halfway (Class C)  
+    +  lowering the dumbbell only halfway (Class D)   
+    +  throwing the hips to the front (Class E)  
+
+The goal of your project is to predict the manner in which they did the exercise. Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes. Participants were supervised by an experienced weight lifter to make sure the execution complied to the manner they were supposed to simulate. We made sure that all participants could easily simulate the mistakes in a safe and controlled manner by using a relatively light dumbbell (1.25kg).  
+
+*  You should create a report describing:   
+    +  how you built your model  
+    +  how you used cross validation  
+    +  what you think the expected out of sample  
+  
+  
+##Outline of report  
+1. Load packages  
+2. Load data  
+3. Clean data  
+4. Separate data into testing and training datasets  
+5. Create basic decision tree model and test  
+6. Create random forest model and test  
+7. Conclusions  
+8. Appendix  
+\pagebreak  
+
+## 1. Load all relevant packages
+This includes the caret, rattle, randomForest, randomForestExplainer and cowplot packages. See versions used in Appendix - Figure 9. 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(caret)
+library(rattle)
+library(randomForest)
+library(randomForestExplainer)
+library(cowplot)
+```
+
+##2. Load data
+```{r load data, include=TRUE}
+url <- "http://groupware.les.inf.puc-rio.br/static/WLE/WearableComputing_weight_lifting_exercises_biceps_curl_variations.csv"
+df <- read.csv(url, header = TRUE, na.strings=c("NA","#DIV/0!",""))
+```
+
+##3. Clean up data
+```{r clean data}
+#Remove columns containing ALL NA values
+df <- df[,colSums(is.na(df)) == 0]
+
+#Remove all irrelevant columns that you will not need as predictors 
+df <- subset(df, select = -c(1:7))
+```
+
+##Separate data into testing and training datasets
+The links provided for the class did not include the classe variable so my training and tests datasets will look slightly different as I took them from the main source and re-separated them.  
+    training: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv  
+    testing: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv  
+    main source: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har  
+See Figure 1 and 2 for more information on data.   
+```{r testing-and-training}
+#Create training and testing datasets
+inTrain <- createDataPartition(y = df$classe,
+                               p=0.7, list = FALSE)
+training <- df[inTrain,]
+testing <- df[-inTrain,]
+```
+
+
+##4. Create basic decision tree model and test
+The basic decision tree model is only composed of one tree where the classe variable is the outcome and there are 51 predictors, which are listed in Figure 1. This model gives us a 48% accuracy on our training set (Figure 3) and a 47.9% accurancy on our test set (Figure 4). Many variables are miscategorized as you can see by looking at the confusion matrices (Figure 3-5). Therefore, we will improve this model by using a random forest. 
+```{r rpart-model}
+set.seed(1234)
+
+#Make simple decision tree model using rpart
+model <- train(classe ~ ., data = training, method="rpart")
+
+#Apply model to training dataset and see accuracy
+rpartmodel_train <- predict(model, data = training)
+CM_train <- confusionMatrix(training$classe, rpartmodel_train)
+
+#Apply model to testing dataset and see accuracy
+rpartmodel_test <- predict(model, newdata = testing)
+rpart_CM_test <- confusionMatrix(testing$classe, rpartmodel_test)
+```
+
+##5. Create random forest model and test
+In order to improve our accuracy, we will use a random forest model. This model generates 100 decision trees (ntree) where each node splits based off of 7 variables (mtry) and gives us variable importance based on majority voting. Using random forest, both our training and testing datasets have an accuracy of >99% with a very small amount of misclassification (Figure 6-7). These can be visualized using multiway importance plots and variable importance plots (Figure 8). 
+```{r rf-model}
+set.seed(2020)
+
+#Generate random forest model
+rfmodel <- randomForest(classe ~ ., data = training, method="rf", ntree=100, importance = TRUE)
+
+#See how well the random forest model performs on training dataset
+rfmodel_train <- predict(rfmodel, data = training)
+rf_CM_train <- confusionMatrix(training$classe, rfmodel_train)
+
+#See which variables are the most important in the training dataset
+variableimportance <- importance(rfmodel)
+variableimportance <- varImp(rfmodel)[1:10,]
+
+min_depth_frame <- min_depth_distribution(rfmodel)
+plot1 <- plot_min_depth_distribution(min_depth_frame)
+
+importance_frame <- measure_importance(rfmodel)
+plot2 <- plot_multi_way_importance(importance_frame, size_measure = "no_of_nodes")
+
+#See how well the random forest model performs on testing dataset
+rfmodel_test <- predict(rfmodel, newdata = testing)
+rf_CM_test <- confusionMatrix(testing$classe, rfmodel_test)
+```
+For our Random Forest model, our error rate is 0.17%. 
+
+##6. Conclusions
+Based on both our simple decision tree and random forest model, the roll_belt, pitch_forearm and magnet_dumbbell_y variables contribute the most importance to our model. Therefore, we hypothesize that by looking at these variables (and other in the top ten from random forest) one should be able to predict common workout errors. 
+\pagebreak 
+
+## 7. Appendix
+
+####Figure 1. Name of all variables included in model
+```{r afig1, echo = FALSE}
+colnames(df)
+```
+
+####Figure 2. Dimensions of training and testing datasets
+These datasets were split 70:30 where the training set had more data.
+```{r test train dim, echo = FALSE}
+dim(training); dim(testing)
+```
+
+####Figure 3. Rpart training information
+```{r Rpart model1, echo = FALSE}
+#Training data from rpart model
+table(training$classe, rpartmodel_train)
+CM_train$overall
+```
+####Figure 4. Rpart testing information
+```{r Rpart model 2, echo = FALSE}
+#Testing data from rpart model
+table(testing$classe, rpartmodel_test)
+rpart_CM_test$overall
+```
+
+####Figure 5. Rpart visualization
+```{r Rpart model 3, echo = FALSE}
+#Give graphical representation of model
+fancyRpartPlot(model$finalModel)
+```
+
+####Figure 6. Random forest information - training
+```{r RF1, echo= FALSE}
+#Random forest training data
+table(training$classe, rfmodel_train)
+rf_CM_train$overall
+rf_CM_train
+variableimportance
+```
+####Figure 7. Random forest information - testing
+```{r RF2, echo= FALSE}
+#Random forest testig data
+table(testing$classe, rfmodel_test)
+rf_CM_test$overall
+rf_CM_test
+```
+
+####Figure 8. Random forest visualization
+```{r RF3, echo= FALSE}
+#Random forest plots from training dataset
+plot1
+plot2
+```
+
+####Figure 9. List of all packages used and what version
+```{r package versions, echo=TRUE}
+version$version.string
+packageVersion("caret", lib.loc = NULL)
+packageVersion("rattle", lib.loc = NULL)
+packageVersion("randomForest", lib.loc = NULL)
+packageVersion("randomForestExplainer", lib.loc = NULL)
+packageVersion("cowplot", lib.loc = NULL)
+```
+
+
+
